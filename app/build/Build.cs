@@ -33,7 +33,7 @@ class Build : NukeBuild
     [Parameter("Project Author")] readonly string ProjectAuthor = "Michael Lucas (mike.lucas@wolterskluwer.com)"; //default
     [Parameter("Project Copyright")] readonly string ProjectCopyright = "Copyright 2022"; //default
     [Parameter("Project VCS Url")] readonly string ProjectUrl = "https://github.com/mtlucas/PuppetHieraApi"; //default
-    [Parameter("NuGet repository server Url")] readonly string NugetApiUrl = "https://nuget01.dev.rph.int/"; //default
+    [Parameter("NuGet repository server Url")] readonly string NugetApiUrl = "https://nuget01.dev.rph.int/nuget/Teamcity/"; //default
     [Parameter("Nuget repository server ApiKey")] readonly string NugetApiKey;
     [Parameter("Publishes .NET runtime with app")] readonly Boolean SelfContained = true;
 
@@ -81,7 +81,7 @@ class Build : NukeBuild
                 .SetInformationalVersion(BuildVersion)
                 .SetCopyright(ProjectCopyright)
                 .SetSelfContained(SelfContained)
-                .SetRuntime(SelfContained ? "win-x64" : null)
+                .SetRuntime(SelfContained ? "linux-x64" : null)
                 .SetOutput(ArtifactsDirectory / "output"));
         });
 

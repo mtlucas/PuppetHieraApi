@@ -28,14 +28,14 @@ namespace PuppetHieraApi.Controllers
         /// <param name="hieraSearchRequest"></param>
         /// <returns></returns>
         [HttpGet]
-        public async Task<IActionResult> HieraSearch([FromQuery]HieraApiPostData hieraSearchRequest)
+        public async Task<IActionResult> HieraSearch([FromQuery]HieraApiQueryData hieraSearchRequest)
         {
             // Psuedo code:
             // 1. query Puppet Classifier and get env.json into json object (from string output):  https://puppet.com/docs/pe/2021.2/node_classifier_service_api.html
             // 2. extract (filter) json for environment name variables (only) into another variable
             // 3. create random name /tmp file
             // 4. then write extracted json to /tmp file
-            // 5. execute puppet lookup using /tmp file and other params from POST:  https://puppet.com/docs/puppet/7/man/lookup.html
+            // 5. execute puppet lookup using /tmp file and other params from GET:  https://puppet.com/docs/puppet/7/man/lookup.html
             // 6. delete /tmp file
             // 6. populate and return json containing puppet ConsoleVariables and HieraSearchValue result
 
@@ -45,7 +45,7 @@ namespace PuppetHieraApi.Controllers
             const string envjsonEndpoint = "https://localhost:4433/classifier-api/v1/groups";
             HieraData hieraData = new HieraData();
             hieraSearchRequest.Branch = hieraSearchRequest.Branch.Replace(".", "_");  // Convert periods to underscores for Puppet Code Deploy branch naming convention
-            Log.Information($"POST data: Environment={hieraSearchRequest.Environment}, Branch={hieraSearchRequest.Branch}, HieraSearchKey={hieraSearchRequest.HieraSearchKey}");
+            Log.Information($"GET query data: Environment={hieraSearchRequest.Environment}, Branch={hieraSearchRequest.Branch}, HieraSearchKey={hieraSearchRequest.HieraSearchKey}");
             /////////////////////////////////////////////////////
             /// Query Puppet Classifier for Console Variables ///
             /////////////////////////////////////////////////////
@@ -63,7 +63,7 @@ namespace PuppetHieraApi.Controllers
                     var httpResponse = await httpClient.SendAsync(request);
                     if (httpResponse.IsSuccessStatusCode)
                     {
-                        envjsonResult = httpResponse.Content.ReadAsStringAsync().Result;
+                        envjsonResult = await httpResponse.Content.ReadAsStringAsync();
                     }
                     else
                     {
@@ -88,19 +88,19 @@ namespace PuppetHieraApi.Controllers
                 Log.Debug($"Begin JSONPath filter on envjson using environment {hieraSearchRequest.Environment}...");
                 IEnumerable<JToken> envjsonTokens = envjsonParse.SelectTokens("$..[?(@.name == '" + hieraSearchRequest.Environment + "')].variables", false);  // Do not error on bad match
                 Log.Debug($"Number of tokens matched: {envjsonTokens.Count()}");
-                if (envjsonTokens.Count() == 0)
+                if (!envjsonTokens.Any())
                 {
-                    Log.Error("Puppet Classifier result returned no values while trying to filter, is Environment POST data correct?");
+                    Log.Error("Puppet Classifier result returned no values while trying to filter, is Environment query data correct?");
                     return StatusCode(500, "Puppet Classifier result returned no values while trying to match on filter, check for valid environment name.");
                 }
                 // Use First element returned from JArray, as there should only be one, but this will return only a single JObject
-                hieraData.ConsoleVariables = envjsonTokens.ElementAt(0);
+                hieraData.ConsoleVariables = envjsonTokens.First();
                 //hieraData.ConsoleVariables = JsonConvert.SerializeObject(envjsonTokens.ElementAt(0)).ToString();
                 Log.Information($"Puppet Console Variables for environment {hieraSearchRequest.Environment}: {hieraData.ConsoleVariables.ToString()}");
             }
             string tmpfile = "/tmp/" + Path.GetRandomFileName();
             Log.Debug($"Creating temp file: {tmpfile} with Puppet Console variables...");
-            System.IO.File.WriteAllText(tmpfile, hieraData.ConsoleVariables.ToString());
+            await System.IO.File.WriteAllTextAsync(tmpfile, hieraData.ConsoleVariables.ToString());
             ////////////////////////////////////////////
             /// Execute Puppet lookup CMD for result ///
             ////////////////////////////////////////////
@@ -109,8 +109,15 @@ namespace PuppetHieraApi.Controllers
             var (lookupResult, lookupError) = await ReadAsync("/usr/local/bin/puppet",
                 new[] { "lookup", "--merge", "deep", "--merge-hash-arrays", "--render-as", "json", "--environment", hieraSearchRequest.Branch, "--facts", tmpfile, hieraSearchRequest.HieraSearchKey },
                 handleExitCode: code => (exitCode = code) < 2);
-            Log.Debug($"Deleting temp file {tmpfile}");
-            System.IO.File.Delete(tmpfile);
+            try
+            {
+                Log.Debug($"Deleting temp file {tmpfile}");
+                System.IO.File.Delete(tmpfile);
+            } 
+            catch (IOException ioException)
+            {
+                Log.Warning(ioException, "Can't delete temp file");
+            }
             if (exitCode != 0)
             {
                 Log.Error($"Puppet lookup error: {lookupError}");
